@@ -58,8 +58,9 @@ internal sealed class StatusCard : Control, IThemed
         _title = title;
         _subtitle = subtitle;
         AccessibleName = title + ". " + subtitle;
+        BackColor = state.Active ? Theme.Current.SuccessSoft : Theme.Current.Surface;
         PerformLayout();
-        Invalidate();
+        Invalidate(true);
     }
 
     private static string Remaining(TimeSpan left)
@@ -97,13 +98,8 @@ internal sealed class StatusCard : Control, IThemed
         var rect = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
         using (var path = Theme.RoundedRect(rect, LogicalToDeviceUnits(14)))
         {
-            var tint = active ? p.SuccessSoft : p.Surface;
-            using (var brush = new LinearGradientBrush(rect, p.Surface, tint, LinearGradientMode.Horizontal))
-            {
-                brush.SetSigmaBellShape(1f, 0.9f);
-                g.FillPath(brush, path);
-            }
-            using var pen = new Pen(p.Border);
+            using (var brush = new SolidBrush(BackColor)) g.FillPath(brush, path);
+            using var pen = new Pen(active ? Theme.Blend(p.Border, p.Success, 0.35f) : p.Border);
             g.DrawPath(pen, path);
         }
 
@@ -140,7 +136,7 @@ internal sealed class StatusCard : Control, IThemed
 
     public void ApplyTheme(Palette p)
     {
-        BackColor = p.Surface;
+        BackColor = _state?.Active == true ? p.SuccessSoft : p.Surface;
         Invalidate(true);
     }
 }
