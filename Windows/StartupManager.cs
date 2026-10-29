@@ -20,14 +20,10 @@ internal static class StartupManager
 
     public static void Enable()
     {
-        string source = Environment.ProcessPath ?? throw new InvalidOperationException("Executável não encontrado.");
-        string target = InstalledExePath;
-        Directory.CreateDirectory(SettingsStore.DirectoryPath);
-        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
-            File.Copy(source, target, true);
+        CopySelf();
         using var key = Registry.CurrentUser.CreateSubKey(RegistryPath, true)
             ?? throw new InvalidOperationException("Não foi possível configurar a inicialização.");
-        key.SetValue(ValueName, $"\"{target}\"", RegistryValueKind.String);
+        key.SetValue(ValueName, $"\"{InstalledExePath}\"", RegistryValueKind.String);
     }
 
     public static void Disable()
@@ -35,4 +31,36 @@ internal static class StartupManager
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);
         key?.DeleteValue(ValueName, false);
     }
+
+    /// <summary>
+    /// Se a inicialização automática está ligada e o usuário abriu outra versão do EXE,
+    /// atualiza a cópia em AppData para que o próximo login use a versão nova.
+    /// </summary>
+    public static void RefreshInstalledCopy()
+    {
+        try
+        {
+            if (!IsEnabled() || Environment.ProcessPath is not string source || IsInstalledPath(source)) return;
+            var current = new FileInfo(source);
+            var installed = new FileInfo(InstalledExePath);
+            if (current.Length != installed.Length || current.LastWriteTimeUtc != installed.LastWriteTimeUtc)
+                CopySelf();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Mantém a cópia anterior; não é motivo para impedir a abertura.
+        }
+    }
+
+    private static void CopySelf()
+    {
+        string source = Environment.ProcessPath ?? throw new InvalidOperationException("Executável não encontrado.");
+        Directory.CreateDirectory(SettingsStore.DirectoryPath);
+        if (IsInstalledPath(source)) return;
+        File.Copy(source, InstalledExePath, true);
+        File.SetLastWriteTimeUtc(InstalledExePath, File.GetLastWriteTimeUtc(source));
+    }
+
+    private static bool IsInstalledPath(string path) =>
+        string.Equals(Path.GetFullPath(path), Path.GetFullPath(InstalledExePath), StringComparison.OrdinalIgnoreCase);
 }

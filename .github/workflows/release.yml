@@ -1,0 +1,94 @@
+# Roda a cada push na main (por exemplo, o merge de um PR).
+# Se a versão do Guarana.csproj ainda não tem release, compila e publica uma.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publicar release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ler versão e conferir release
+        id: version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Guarana.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $version) { throw "Versão não encontrada em Guarana.csproj" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+          gh release view "v$version" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "A release v$version já existe; nada a fazer."
+            "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
+          $global:LASTEXITCODE = 0
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.version.outputs.skip == 'false'
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Testes
+        if: steps.version.outputs.skip == 'false'
+        run: dotnet run --project tests/Guarana.Tests.csproj -c Release
+
+      - name: Publicar executáveis
+        if: steps.version.outputs.skip == 'false'
+        run: |
+          dotnet publish Guarana.csproj -c Release -r win-x64 -o dist/win-x64
+          dotnet publish Guarana.csproj -c Release -r win-arm64 -o dist/win-arm64
+
+      - name: Montar arquivos e notas
+        if: steps.version.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist/win-x64/Guarana.exe release/Guarana-win-x64.exe
+          Copy-Item dist/win-arm64/Guarana.exe release/Guarana-win-arm64.exe
+          Get-ChildItem release/*.exe | ForEach-Object {
+            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content release/SHA256SUMS.txt
+
+          # Notas da release = seção da versão no CHANGELOG.
+          $lines = Get-Content CHANGELOG.md -Encoding utf8
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($env:VERSION))\]").LineNumber
+          $notes = @()
+          if ($start) {
+            foreach ($line in $lines[$start..($lines.Count - 1)]) {
+              if ($line -match '^## \[' -or $line -match '^\[\d') { break }
+              $notes += $line
+            }
+          }
+          if (-not ($notes -join '').Trim()) { $notes = @("Guaraná $env:VERSION") }
+          $notes += ""
+          $notes += "**Baixe** ``Guarana-win-x64.exe`` (a maioria dos PCs) ou ``Guarana-win-arm64.exe`` (Windows em ARM). Não precisa instalar nada."
+          $notes | Set-Content release-notes.md -Encoding utf8
+
+      - name: Criar release
+        if: steps.version.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release create "v$env:VERSION" release/* `
+            --title "Guaraná $env:VERSION" `
+            --notes-file release-notes.md `
+            --target $env:GITHUB_SHA

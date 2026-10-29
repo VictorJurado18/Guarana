@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Guarana.Windows;
 
+internal enum PulseResult { Sent, ModifierHeld, Failed }
+
 internal static class KeyboardPulse
 {
     private const uint InputKeyboard = 1;
@@ -16,6 +18,7 @@ internal static class KeyboardPulse
         public InputUnion Union;
     }
 
+    // MouseInput is the largest member; it is declared so the union has the size SendInput expects.
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
@@ -44,20 +47,38 @@ internal static class KeyboardPulse
         public IntPtr ExtraInfo;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LastInputInfo
+    {
+        public uint Size;
+        public uint Time;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, [In] Input[] inputs, int size);
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
 
-    public static bool TrySend(out string? error)
+    [DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    /// <summary>Tempo desde a última entrada de teclado ou mouse (inclusive a do próprio F15).</summary>
+    public static TimeSpan IdleTime()
+    {
+        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        if (!GetLastInputInfo(ref info)) return TimeSpan.MaxValue;
+        // Both counters wrap every ~49.7 days; unsigned subtraction handles the wrap.
+        uint elapsed = unchecked((uint)Environment.TickCount - info.Time);
+        return TimeSpan.FromMilliseconds(elapsed);
+    }
+
+    public static PulseResult TrySend(out string? error)
     {
         error = null;
-        // An F15 event while the user holds a modifier may trigger an application shortcut.
-        if ((GetAsyncKeyState(0x10) & 0x8000) != 0 ||
-            (GetAsyncKeyState(0x11) & 0x8000) != 0 ||
-            (GetAsyncKeyState(0x12) & 0x8000) != 0)
-            return true;
+        // An F15 event while the user holds Shift, Ctrl, Alt or Win may trigger a shortcut.
+        if (IsDown(0x10) || IsDown(0x11) || IsDown(0x12) || IsDown(0x5B) || IsDown(0x5C))
+            return PulseResult.ModifierHeld;
 
         var inputs = new[]
         {
@@ -70,8 +91,10 @@ internal static class KeyboardPulse
                 }
             }
         };
-        if (SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1) return true;
+        if (SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1) return PulseResult.Sent;
         error = new Win32Exception(Marshal.GetLastWin32Error()).Message;
-        return false;
+        return PulseResult.Failed;
     }
+
+    private static bool IsDown(int virtualKey) => (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 }

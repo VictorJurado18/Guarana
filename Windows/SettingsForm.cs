@@ -1,248 +1,398 @@
-using System.Globalization;
+using System.Diagnostics;
 using Guarana.Core;
+using Guarana.Windows.Ui;
 
 namespace Guarana.Windows;
 
+/// <summary>Janela principal. Todas as alterações são salvas automaticamente.</summary>
 internal sealed class SettingsForm : Form
 {
-    private static readonly string[] Days =
-        ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+    private static readonly (string Label, int Minutes)[] QuickDurations =
+        [("15 min", 15), ("30 min", 30), ("1 h", 60), ("2 h", 120), ("4 h", 240), ("8 h", 480)];
 
     private readonly GuaranaContext _context;
-    private readonly Label _status = new();
-    private readonly Label _next = new();
-    private readonly Label _error = new();
-    private readonly CheckBox _schedule = new();
-    private readonly CheckBox _startup = new();
-    private readonly NumericUpDown _interval = new();
-    private readonly NumericUpDown _duration = new();
-    private readonly DataGridView _grid = new();
-    private readonly Button _add = new();
-    private readonly Button _delete = new();
+    private readonly StackPanel _stack = new() { Padding = new Padding(24, 16, 24, 20) };
+    private readonly StatusCard _status;
+    private readonly ToggleSwitch _schedule = new();
+    private readonly ScheduleEditor _scheduleEditor = new();
+    private readonly ToggleSwitch _onlyWhenIdle = new();
+    private readonly ToggleSwitch _preventSleep = new();
+    private readonly ToggleSwitch _startup = new();
+    private readonly TextField _interval = new(84) { Suffix = "seg" };
+    private readonly ThemedLabel _footerText = new("", Theme.Small, muted: true);
+    private readonly Panel _footer = new() { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(24, 0, 24, 0) };
+    private readonly System.Windows.Forms.Timer _saveDelay = new() { Interval = 450 };
+    private string? _pulseError;
+    private bool _loading;
 
-    public SettingsForm(GuaranaContext context, AppSettings settings, bool startup)
+    public SettingsForm(GuaranaContext context, Image awake, Image asleep)
     {
         _context = context;
-        Text = "Guaraná · Configurações";
-        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
+        _status = new StatusCard(awake, asleep);
+
+        SuspendLayout();
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Text = "Guaraná";
+        Icon = context.AppIcon;
+        Font = Theme.Body;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(650, 610);
-        Size = new Size(700, 670);
-        BackColor = Color.FromArgb(250, 248, 244);
-        Font = new Font("Segoe UI", 10);
+        ClientSize = new Size(660, 760);
+        MinimumSize = new Size(560, 520);
+        MaximizeBox = false;
+        KeyPreview = true;
 
-        var main = new TableLayoutPanel
+        _stack.Dock = DockStyle.Fill;
+        _stack.Controls.Add(BuildHeader(awake));
+        _stack.Controls.Add(_status);
+        _stack.Controls.Add(BuildQuickCard());
+        _stack.Controls.Add(BuildScheduleCard());
+        _stack.Controls.Add(BuildPreferencesCard());
+
+        _footerText.Anchor = AnchorStyles.Left;
+        _footerText.Dock = DockStyle.Fill;
+        _footerText.AutoSize = false;
+        _footerText.TextAlign = ContentAlignment.MiddleLeft;
+        _footer.Controls.Add(_footerText);
+
+        Controls.Add(_stack);
+        Controls.Add(_footer);
+        ResumeLayout(true);
+
+        _status.Action.Click += (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(20),
-            ColumnCount = 1,
-            RowCount = 5
+            var state = _context.State;
+            if (state.Temporary) _context.EndTemporary();
+            else if (state.Paused) _context.Resume();
+            else _context.Pause();
         };
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 140));
-        main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 95));
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
-        Controls.Add(main);
+        _saveDelay.Tick += (_, _) => { _saveDelay.Stop(); SavePreferences(); };
 
-        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
-        header.Controls.Add(new Label
-        {
-            Text = "Guaraná",
-            Font = new Font("Segoe UI Semibold", 22, FontStyle.Bold),
-            ForeColor = Color.FromArgb(120, 36, 31),
-            AutoSize = true
-        }, 0, 0);
-        _status.AutoSize = true;
-        _status.Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold);
-        header.Controls.Add(_status, 0, 1);
-        _next.AutoSize = true;
-        _next.ForeColor = Color.DimGray;
-        header.Controls.Add(_next, 0, 2);
-        main.Controls.Add(header, 0, 0);
+        LoadFrom(_context.Settings, _context.StartupEnabled);
+        ApplyTheme();
+        Theme.Changed += OnThemeChanged;
 
-        var general = new GroupBox { Text = "Funcionamento", Dock = DockStyle.Fill };
-        var generalFlow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(10, 8, 5, 4),
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false
-        };
-        _schedule.Text = "Usar horários programados (fora deles, não enviar F15)";
-        _schedule.AutoSize = true;
-        _schedule.Checked = settings.ScheduleEnabled;
-        _schedule.CheckedChanged += (_, _) => UpdateScheduleEnabled();
-        generalFlow.Controls.Add(_schedule);
-
-        var intervalFlow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        intervalFlow.Controls.Add(new Label { Text = "Enviar F15 a cada", AutoSize = true, Margin = new Padding(0, 6, 5, 0) });
-        _interval.Minimum = 10;
-        _interval.Maximum = 3600;
-        _interval.Value = Math.Clamp(settings.IntervalSeconds, 10, 3600);
-        _interval.Width = 75;
-        intervalFlow.Controls.Add(_interval);
-        intervalFlow.Controls.Add(new Label { Text = "segundos", AutoSize = true, Margin = new Padding(5, 6, 0, 0) });
-        generalFlow.Controls.Add(intervalFlow);
-
-        _startup.Text = "Iniciar com o Windows (somente este usuário)";
-        _startup.AutoSize = true;
-        _startup.Checked = startup;
-        generalFlow.Controls.Add(_startup);
-        generalFlow.Controls.Add(new Label
-        {
-            Text = "Ao habilitar, uma cópia do EXE é guardada em AppData para manter o caminho fixo.",
-            AutoSize = true,
-            ForeColor = Color.DimGray,
-            Font = new Font("Segoe UI", 8.5f)
-        });
-        general.Controls.Add(generalFlow);
-        main.Controls.Add(general, 0, 1);
-
-        var scheduleGroup = new GroupBox { Text = "Horários · início incluído, fim excluído", Dock = DockStyle.Fill };
-        var scheduleLayout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10), RowCount = 3, ColumnCount = 1 };
-        scheduleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        scheduleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        scheduleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
-        _grid.Dock = DockStyle.Fill;
-        _grid.AllowUserToAddRows = false;
-        _grid.AllowUserToDeleteRows = false;
-        _grid.RowHeadersVisible = false;
-        _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        _grid.MultiSelect = false;
-        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-        var dayColumn = new DataGridViewComboBoxColumn { Name = "Dia", HeaderText = "Dia", FillWeight = 48 };
-        dayColumn.Items.AddRange(Days);
-        _grid.Columns.Add(dayColumn);
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Inicio", HeaderText = "Início (HH:mm)", FillWeight = 26 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Fim", HeaderText = "Fim (HH:mm)", FillWeight = 26 });
-        foreach (var rule in settings.Rules)
-            _grid.Rows.Add(Days[(int)rule.Day], rule.Start, rule.End);
-        scheduleLayout.Controls.Add(_grid, 0, 0);
-
-        var gridButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-        _add.Text = "Adicionar período";
-        _add.AutoSize = true;
-        _add.Click += (_, _) => _grid.Rows.Add("Segunda", "09:00", "18:00");
-        _delete.Text = "Excluir selecionado";
-        _delete.AutoSize = true;
-        _delete.Click += (_, _) =>
-        {
-            if (_grid.CurrentRow is not null) _grid.Rows.Remove(_grid.CurrentRow);
-        };
-        gridButtons.Controls.Add(_add);
-        gridButtons.Controls.Add(_delete);
-        scheduleLayout.Controls.Add(gridButtons, 0, 1);
-        scheduleLayout.Controls.Add(new Label
-        {
-            Text = "Se o horário de fim for igual ou anterior ao início, o período termina no dia seguinte.",
-            AutoSize = true,
-            ForeColor = Color.DimGray,
-            Font = new Font("Segoe UI", 8.5f)
-        }, 0, 2);
-        scheduleGroup.Controls.Add(scheduleLayout);
-        main.Controls.Add(scheduleGroup, 0, 2);
-
-        var session = new GroupBox { Text = "Controles rápidos", Dock = DockStyle.Fill };
-        var sessionFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10, 12, 5, 0), WrapContents = false };
-        sessionFlow.Controls.Add(new Label { Text = "Ativar por", AutoSize = true, Margin = new Padding(0, 7, 5, 0) });
-        _duration.Minimum = 1;
-        _duration.Maximum = 1440;
-        _duration.Value = 30;
-        _duration.Width = 70;
-        sessionFlow.Controls.Add(_duration);
-        sessionFlow.Controls.Add(new Label { Text = "minutos", AutoSize = true, Margin = new Padding(5, 7, 8, 0) });
-        var activate = new Button { Text = "Ativar", AutoSize = true };
-        activate.Click += (_, _) => _context.ActivateFor((int)_duration.Value);
-        sessionFlow.Controls.Add(activate);
-        var pause = new Button { Text = "Pausar", AutoSize = true };
-        pause.Click += (_, _) => _context.Pause();
-        sessionFlow.Controls.Add(pause);
-        var resume = new Button { Text = "Retomar", AutoSize = true };
-        resume.Click += (_, _) => _context.Resume();
-        sessionFlow.Controls.Add(resume);
-        session.Controls.Add(sessionFlow);
-        main.Controls.Add(session, 0, 3);
-
-        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _error.AutoSize = true;
-        _error.ForeColor = Color.Firebrick;
-        footer.Controls.Add(_error, 0, 0);
-        var save = new Button
-        {
-            Text = "Salvar configurações",
-            AutoSize = true,
-            BackColor = Color.FromArgb(150, 48, 41),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Padding = new Padding(6, 3, 6, 3)
-        };
-        save.Click += (_, _) => Save();
-        footer.Controls.Add(save, 1, 0);
-        main.Controls.Add(footer, 0, 4);
-
-        UpdateScheduleEnabled();
         FormClosing += (_, e) =>
         {
             if (_context.IsExiting) return;
+            if (_saveDelay.Enabled) { _saveDelay.Stop(); SavePreferences(); }
             e.Cancel = true;
             Hide();
         };
     }
 
-    private void UpdateScheduleEnabled()
+    // ---- Construção ------------------------------------------------------------------
+
+    private Control BuildHeader(Image logo)
     {
-        _grid.Enabled = _schedule.Checked;
-        _add.Enabled = _schedule.Checked;
-        _delete.Enabled = _schedule.Checked;
+        var header = new TableLayoutPanel
+        {
+            ColumnCount = 3,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty,
+            Height = 64
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var picture = new PictureBox
+        {
+            Image = logo,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Size = new Size(44, 44),
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 12, 0),
+            Anchor = AnchorStyles.Left
+        };
+        var titles = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty,
+            Anchor = AnchorStyles.Left
+        };
+        titles.Controls.Add(new ThemedLabel("Guaraná", Theme.Title), 0, 0);
+        titles.Controls.Add(new ThemedLabel("Seu Windows acordado, só quando você quer.", Theme.Small, muted: true), 0, 1);
+
+        var about = new PillButton("Sobre", PillKind.Ghost) { Anchor = AnchorStyles.Right, Margin = Padding.Empty, Radius = 8 };
+        about.Click += (_, _) => ShowAbout();
+
+        header.Controls.Add(picture, 0, 0);
+        header.Controls.Add(titles, 1, 0);
+        header.Controls.Add(about, 2, 0);
+        return new FixedHeight(header, 64);
     }
 
-    private void Save()
+    private Card BuildQuickCard()
     {
+        var card = new Card();
+        card.AddRow(new ThemedLabel("Ativação rápida", Theme.SectionTitle));
+        card.AddRow(new ThemedLabel("Mantém o PC acordado por um tempo e depois volta ao modo normal.",
+            Theme.Small, muted: true), 2);
+        var chips = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty
+        };
+        foreach (var (label, minutes) in QuickDurations)
+        {
+            var chip = new PillButton(label, PillKind.Chip) { Margin = new Padding(0, 0, 8, 8) };
+            chip.Click += (_, _) => _context.ActivateFor(minutes);
+            chips.Controls.Add(chip);
+        }
+        card.AddRow(chips, 14);
+        return card;
+    }
+
+    private Card BuildScheduleCard()
+    {
+        var card = new Card();
+        card.AddRow(new SettingRow("Horários programados",
+            "Fora dos períodos, o Guaraná fica em repouso e não envia nenhum sinal.", _schedule));
+        AddDivider(card);
+        card.AddRow(_scheduleEditor);
+        card.AddRow(new ThemedLabel(
+            "Início incluído, fim excluído. Se o fim for igual ou anterior ao início, o período termina no dia seguinte.",
+            Theme.Small, muted: true), 6);
+
+        _schedule.CheckedChanged += (_, _) =>
+        {
+            _scheduleEditor.Enabled = _schedule.Checked;
+            QueueSave();
+        };
+        _scheduleEditor.Changed += (_, _) => QueueSave();
+        return card;
+    }
+
+    private Card BuildPreferencesCard()
+    {
+        var card = new Card();
+        card.AddRow(new ThemedLabel("Preferências", Theme.SectionTitle));
+        card.AddRow(new SettingRow("Só quando o computador estiver ocioso",
+            "Não envia nada enquanto você digita ou mexe o mouse.", _onlyWhenIdle), 14);
+        AddDivider(card);
+        card.AddRow(new SettingRow("Impedir suspensão e tela apagada",
+            "Usa o recurso do próprio Windows enquanto o Guaraná estiver ativo.", _preventSleep));
+        AddDivider(card);
+        card.AddRow(new SettingRow("Iniciar com o Windows",
+            "Somente para este usuário. Não requer administrador.", _startup));
+        AddDivider(card);
+        card.AddRow(new SettingRow("Intervalo entre sinais",
+            "Tempo entre os pulsos da tecla F15 (10 a 3600 segundos).", _interval));
+
+        _onlyWhenIdle.CheckedChanged += (_, _) => QueueSave();
+        _preventSleep.CheckedChanged += (_, _) => QueueSave();
+        _startup.CheckedChanged += (_, _) => ApplyStartup();
+        _interval.Box.MaxLength = 4;
+        _interval.Box.KeyPress += (_, e) => { if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar)) e.Handled = true; };
+        _interval.Box.TextChanged += (_, _) => { _interval.Invalid = false; QueueSave(); };
+        _interval.Box.Leave += (_, _) => _interval.Invalid = ReadInterval() is null;
+        return card;
+    }
+
+    private static void AddDivider(Card card)
+    {
+        var divider = new Divider();
+        card.AddRow(divider);
+        divider.Margin = new Padding(0, 14, 0, 14);
+    }
+
+    // ---- Dados ----------------------------------------------------------------------
+
+    private void LoadFrom(AppSettings settings, bool startup)
+    {
+        _loading = true;
+        _schedule.SetSilently(settings.ScheduleEnabled);
+        _scheduleEditor.Load(settings.Rules);
+        _scheduleEditor.Enabled = settings.ScheduleEnabled;
+        _onlyWhenIdle.SetSilently(settings.OnlyWhenIdle);
+        _preventSleep.SetSilently(settings.PreventSleep);
+        _startup.SetSilently(startup);
+        _interval.Box.Text = settings.IntervalSeconds.ToString();
+        _loading = false;
+        ShowFooter("As alterações são salvas automaticamente.", error: false);
+    }
+
+    private int? ReadInterval() =>
+        int.TryParse(_interval.Box.Text, out int value) && value is >= 10 and <= 3600 ? value : null;
+
+    private void QueueSave()
+    {
+        if (_loading) return;
+        _saveDelay.Stop();
+        _saveDelay.Start();
+    }
+
+    private void SavePreferences()
+    {
+        var rules = _scheduleEditor.TryGetRules(out string? error);
+        int? interval = ReadInterval();
+        if (rules is null)
+        {
+            ShowFooter(error ?? "Revise os horários.", error: true);
+            return;
+        }
+        if (interval is null)
+        {
+            if (!_interval.Box.Focused) _interval.Invalid = true;
+            ShowFooter("O intervalo deve ficar entre 10 e 3600 segundos.", error: true);
+            return;
+        }
+        if (_schedule.Checked && rules.Count == 0)
+        {
+            ShowFooter("Adicione ao menos um período ou desative os horários programados.", error: true);
+            return;
+        }
+
+        var settings = _context.Settings;
+        settings.ScheduleEnabled = _schedule.Checked;
+        settings.Rules = rules;
+        settings.OnlyWhenIdle = _onlyWhenIdle.Checked;
+        settings.PreventSleep = _preventSleep.Checked;
+        settings.IntervalSeconds = interval.Value;
         try
         {
-            _grid.EndEdit();
-            var settings = new AppSettings
-            {
-                IntervalSeconds = (int)_interval.Value,
-                ScheduleEnabled = _schedule.Checked,
-                SchedulePaused = _context.SchedulePaused,
-                ManualEnabled = _context.ManualEnabled,
-                Rules = []
-            };
-            foreach (DataGridViewRow row in _grid.Rows)
-            {
-                string dayText = Convert.ToString(row.Cells[0].Value, CultureInfo.InvariantCulture) ?? "";
-                int dayIndex = Array.IndexOf(Days, dayText);
-                if (dayIndex < 0) throw new ArgumentException("Selecione um dia válido em cada linha.");
-                var rule = new ScheduleRule((DayOfWeek)dayIndex,
-                    Convert.ToString(row.Cells[1].Value, CultureInfo.InvariantCulture) ?? "",
-                    Convert.ToString(row.Cells[2].Value, CultureInfo.InvariantCulture) ?? "");
-                ScheduleEngine.Validate(rule);
-                settings.Rules.Add(rule);
-            }
-            _context.SaveSettings(settings, _startup.Checked);
-            _error.ForeColor = Color.DarkGreen;
-            _error.Text = "Configurações salvas.";
+            _context.ApplyPreferences(settings);
+            ShowFooter($"✓  Salvo às {DateTime.Now:HH:mm:ss}", error: false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _error.ForeColor = Color.Firebrick;
-            _error.Text = ex.Message;
+            ShowFooter("Não foi possível salvar: " + ex.Message, error: true);
         }
     }
 
-    public void SetStatus(ActivationState state, string nextText, string? error)
+    private void ApplyStartup()
     {
-        _status.Text = (state.Active ? "● Ativo" : "● Inativo") + " · " + state.Reason;
-        _status.ForeColor = state.Active ? Color.FromArgb(89, 119, 53) : Color.FromArgb(130, 80, 80);
-        _next.Text = nextText.Length > 0 ? nextText.TrimStart(' ', '·') : "Sem mudança programada";
-        if (error is not null)
+        if (_loading) return;
+        try
         {
-            _error.ForeColor = Color.Firebrick;
-            _error.Text = "Falha ao enviar F15: " + error;
+            _context.SetStartup(_startup.Checked);
+            ShowFooter(_startup.Checked ? "✓  Vai iniciar com o Windows." : "✓  Não vai mais iniciar com o Windows.", error: false);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or System.Security.SecurityException)
+        {
+            _startup.SetSilently(!_startup.Checked);
+            ShowFooter("Não foi possível alterar a inicialização: " + ex.Message, error: true);
+        }
+    }
+
+    private void ShowFooter(string text, bool error)
+    {
+        _footerText.Text = text;
+        _footerText.ForeColor = error ? Theme.Current.Danger : Theme.Current.TextMuted;
+        _footerText.Tag = error ? "error" : null;
+    }
+
+    /// <summary>Chamado pelo contexto a cada mudança de estado.</summary>
+    public void SetState(ActivationState state, DateTime now, string? pulseError)
+    {
+        _status.SetState(state, now);
+        if (pulseError != _pulseError)
+        {
+            _pulseError = pulseError;
+            if (pulseError is not null) ShowFooter("Falha ao enviar F15: " + pulseError, error: true);
+            else if (_footerText.Text.StartsWith("Falha ao enviar", StringComparison.Ordinal))
+                ShowFooter("O envio voltou a funcionar.", error: false);
+        }
+    }
+
+    // ---- Tema e diálogos --------------------------------------------------------------
+
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        if (IsDisposed) return;
+        if (InvokeRequired) BeginInvoke(ApplyTheme);
+        else ApplyTheme();
+    }
+
+    private void ApplyTheme()
+    {
+        var p = Theme.Current;
+        BackColor = p.Background;
+        _stack.BackColor = p.Background;
+        _footer.BackColor = p.Background;
+        Walk(this, p);
+        ShowFooter(_footerText.Text, _footerText.Tag as string == "error");
+        Theme.ApplyChrome(this);
+        Invalidate(true);
+    }
+
+    private static void Walk(Control root, Palette p)
+    {
+        foreach (Control c in root.Controls)
+        {
+            if (c is IThemed themed) themed.ApplyTheme(p);
+            Walk(c, p);
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Theme.ApplyChrome(this);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape)
+        {
+            Close();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private void ShowAbout()
+    {
+        var github = new TaskDialogCommandLinkButton("Abrir no GitHub", "Código-fonte, novidades e relato de problemas");
+        var page = new TaskDialogPage
+        {
+            Caption = "Sobre o Guaraná",
+            Heading = $"Guaraná {Application.ProductVersion.Split('+')[0]}",
+            Text = "Mantém o Windows acordado com um pulso discreto da tecla F15, " +
+                   "continuamente, por tempo determinado ou em horários programados.\n\n" +
+                   "Sem rede, sem telemetria e sem atualização automática.",
+            Footnote = new TaskDialogFootnote("Software livre sob a Licença MIT."),
+            Icon = new TaskDialogIcon(_context.AppIcon),
+            Buttons = { github, TaskDialogButton.Close },
+            AllowCancel = true
+        };
+        if (TaskDialog.ShowDialog(this, page) == github)
+            Process.Start(new ProcessStartInfo("https://github.com/VictorJurado18/Guarana") { UseShellExecute = true });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Theme.Changed -= OnThemeChanged;
+            _saveDelay.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    /// <summary>Envolve um controle com altura fixa (em unidades lógicas) para o <see cref="StackPanel"/>.</summary>
+    private sealed class FixedHeight : Panel
+    {
+        private readonly int _height;
+
+        public FixedHeight(Control child, int height)
+        {
+            _height = height;
+            BackColor = Color.Transparent;
+            child.Dock = DockStyle.Fill;
+            Controls.Add(child);
+        }
+
+        public override Size GetPreferredSize(Size proposedSize) =>
+            new(proposedSize.Width, LogicalToDeviceUnits(_height));
     }
 }

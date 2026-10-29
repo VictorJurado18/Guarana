@@ -1,7 +1,10 @@
 bin/
 obj/
 .vs/
+.vscode/
+.idea/
 *.user
 *.suo
 publish/
 dist/
+release/

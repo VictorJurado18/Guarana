@@ -4,17 +4,22 @@ namespace Guarana;
 
 internal static class Program
 {
+    private const string MutexName = @"Local\GuaranaDesktopApp";
+    private const string ShowSignalName = @"Local\GuaranaDesktopApp.Show";
+
     [STAThread]
     private static void Main()
     {
-        ApplicationConfiguration.Initialize();
-        using var singleInstance = new Mutex(true, @"Local\GuaranaDesktopApp", out bool created);
+        using var singleInstance = new Mutex(true, MutexName, out bool created);
+        using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSignalName);
         if (!created)
         {
-            MessageBox.Show("O Guaraná já está em execução na bandeja do Windows.",
-                "Guaraná", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // Já está rodando: pede à instância existente para abrir a janela e sai.
+            showSignal.Set();
             return;
         }
-        Application.Run(new GuaranaContext());
+
+        ApplicationConfiguration.Initialize();
+        Application.Run(new GuaranaContext(showSignal));
     }
 }
