@@ -1,0 +1,80 @@
+# Roda em todo pull request: testa, gera os .exe e anexa ao PR como artefato.
+# Se o PR muda a versão, confere se ela é nova e se o CHANGELOG tem a seção dela.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Testar e empacotar
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Ler versão
+        id: version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Guarana.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $version) { throw "Versão não encontrada em Guarana.csproj" }
+          "value=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Versão: $version"
+
+      - name: Conferir versão nova
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          $baseXml = git show "origin/${env:BASE}:Guarana.csproj" 2>$null
+          $baseVersion = if ($baseXml) { (([xml]($baseXml -join "`n")).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1) } else { "" }
+          if ($env:VERSION -eq $baseVersion) {
+            Write-Host "Versão inalterada ($env:VERSION): PR sem nova release."
+            exit 0
+          }
+          if (git tag --list "v$env:VERSION") { throw "A tag v$env:VERSION já existe. Aumente a versão em Guarana.csproj." }
+          if ([version]$env:VERSION -le [version]$baseVersion) { throw "A versão $env:VERSION não é maior que $baseVersion." }
+          if (-not (Select-String -Path CHANGELOG.md -Pattern "^## \[$([regex]::Escape($env:VERSION))\]" -Quiet)) {
+            throw "Adicione a seção '## [$env:VERSION]' no CHANGELOG.md."
+          }
+          "### Nova versão: $baseVersion → $env:VERSION`nAo fazer o merge, a release v$env:VERSION será publicada automaticamente." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Testes
+        run: dotnet run --project tests/Guarana.Tests.csproj -c Release
+
+      - name: Publicar win-x64
+        run: dotnet publish Guarana.csproj -c Release -r win-x64 -o dist/win-x64
+
+      - name: Publicar win-arm64
+        run: dotnet publish Guarana.csproj -c Release -r win-arm64 -o dist/win-arm64
+
+      - name: Organizar arquivos
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item dist/win-x64/Guarana.exe "release/Guarana-$env:VERSION-win-x64.exe"
+          Copy-Item dist/win-arm64/Guarana.exe "release/Guarana-$env:VERSION-win-arm64.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Guarana-${{ steps.version.outputs.value }}
+          path: release/
+          retention-days: 14

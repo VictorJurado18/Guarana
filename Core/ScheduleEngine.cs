@@ -13,8 +13,30 @@ public static class ScheduleEngine
     }
 
     public static bool TryParse(string? text, out TimeOnly time) =>
-        TimeOnly.TryParseExact(text, TimeFormat, CultureInfo.InvariantCulture,
+        TimeOnly.TryParseExact(text?.Trim(), TimeFormat, CultureInfo.InvariantCulture,
             DateTimeStyles.None, out time);
+
+    /// <summary>Normaliza entradas como "9", "9:5" ou "0930" para HH:mm. Retorna null se inválida.</summary>
+    public static string? Normalize(string? text)
+    {
+        text = text?.Trim();
+        if (string.IsNullOrEmpty(text)) return null;
+        int hour, minute = 0;
+        if (text.Contains(':'))
+        {
+            var parts = text.Split(':');
+            if (parts.Length != 2 || !int.TryParse(parts[0], out hour) || !int.TryParse(parts[1], out minute))
+                return null;
+        }
+        else if (text.All(char.IsDigit) && text.Length <= 4)
+        {
+            if (text.Length <= 2) hour = int.Parse(text);
+            else { hour = int.Parse(text[..^2]); minute = int.Parse(text[^2..]); }
+        }
+        else return null;
+        if (hour is < 0 or > 23 || minute is < 0 or > 59) return null;
+        return $"{hour:00}:{minute:00}";
+    }
 
     public static bool IsActive(DateTime localNow, IReadOnlyList<ScheduleRule> rules)
     {

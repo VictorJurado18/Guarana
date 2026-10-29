@@ -8,6 +8,16 @@ public sealed class AppSettings
     public bool ScheduleEnabled { get; set; }
     public bool SchedulePaused { get; set; }
     public bool ManualEnabled { get; set; } = true;
+
+    /// <summary>Envia F15 apenas quando não houve entrada do usuário durante o intervalo.</summary>
+    public bool OnlyWhenIdle { get; set; } = true;
+
+    /// <summary>Pede ao Windows para não suspender nem desligar a tela enquanto ativo.</summary>
+    public bool PreventSleep { get; set; } = true;
+
+    /// <summary>Fim da ativação temporária em andamento; persiste entre reinícios.</summary>
+    public DateTime? TemporaryUntil { get; set; }
+
     public List<ScheduleRule> Rules { get; set; } = DefaultRules();
 
     public static List<ScheduleRule> DefaultRules() =>
@@ -25,6 +35,9 @@ public sealed class AppSettings
         ScheduleEnabled = ScheduleEnabled,
         SchedulePaused = SchedulePaused,
         ManualEnabled = ManualEnabled,
+        OnlyWhenIdle = OnlyWhenIdle,
+        PreventSleep = PreventSleep,
+        TemporaryUntil = TemporaryUntil,
         Rules = Rules.Select(r => r with { }).ToList()
     };
 }

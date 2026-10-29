@@ -6,11 +6,29 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationIcon>Assets\guarana.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
     <AssemblyName>Guarana</AssemblyName>
     <RootNamespace>Guarana</RootNamespace>
-    <Version>1.0.0</Version>
+
+    <Version>1.1.0</Version>
+    <Product>Guaraná</Product>
+    <AssemblyTitle>Guaraná</AssemblyTitle>
+    <Description>Mantém o Windows acordado: contínuo, por tempo determinado ou em horários programados.</Description>
+    <Authors>Victor Jurado</Authors>
+    <Company>Victor Jurado</Company>
+    <Copyright>© 2026 Victor Jurado · Licença MIT</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/VictorJurado18/Guarana</RepositoryUrl>
+    <NeutralLanguage>pt-BR</NeutralLanguage>
+    <SatelliteResourceLanguages>pt-BR</SatelliteResourceLanguages>
+
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Permite compilar a partir de Linux/macOS (CI); o app em si só roda no Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
@@ -19,5 +37,7 @@
     <Compile Remove="tests\**\*.cs" />
     <EmbeddedResource Include="Assets\guarana.ico" />
     <EmbeddedResource Include="Assets\guarana-paused.ico" />
+    <EmbeddedResource Include="Assets\guarana.png" />
+    <EmbeddedResource Include="Assets\guarana-paused.png" />
   </ItemGroup>
 </Project>
