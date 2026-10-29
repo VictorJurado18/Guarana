@@ -3,6 +3,19 @@
 Todas as mudanças relevantes deste projeto ficam registradas aqui.
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [1.1.1] - 2026-10-29
+
+### Alterado
+- Rodapé fixo com “Tudo salvo automaticamente”, o aviso de que o Guaraná segue rodando na bandeja e o botão **Concluir**.
+- Na primeira vez que a janela é fechada, um aviso na bandeja confirma que nada se perdeu.
+- O editor de horários só aparece com a programação ligada, deixando o cartão compacto quando desligada.
+- A janela ajusta a altura à tela para mostrar tudo sem rolagem sempre que possível.
+
+### Corrigido
+- Retângulo escuro atrás do botão do cartão de status.
+- Espaço vazio abaixo da linha de período nos horários programados.
+- Barra de rolagem clara no tema escuro.
+
 ## [1.1.0] - 2026-10-29
 
 ### Adicionado
@@ -34,5 +47,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 - Primeira versão: pulso F15, modo contínuo, horários programados, ativação temporária e inicialização com o Windows.
 
+[1.1.1]: https://github.com/VictorJurado18/Guarana/releases/tag/v1.1.1
 [1.1.0]: https://github.com/VictorJurado18/Guarana/releases/tag/v1.1.0
 [1.0.0]: https://github.com/VictorJurado18/Guarana/releases/tag/v1.0.0

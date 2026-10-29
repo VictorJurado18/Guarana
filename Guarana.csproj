@@ -11,7 +11,7 @@
     <AssemblyName>Guarana</AssemblyName>
     <RootNamespace>Guarana</RootNamespace>
 
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>Guaraná</Product>
     <AssemblyTitle>Guaraná</AssemblyTitle>
     <Description>Mantém o Windows acordado: contínuo, por tempo determinado ou em horários programados.</Description>
