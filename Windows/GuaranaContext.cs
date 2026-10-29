@@ -222,6 +222,18 @@ internal sealed class GuaranaContext : ApplicationContext
         else StartupManager.Disable();
     }
 
+    /// <summary>Na primeira vez que a janela é fechada, avisa que o app continua na bandeja.</summary>
+    public void WindowHidden()
+    {
+        if (_settings.TrayHintShown) return;
+        var settings = _engine.CurrentSettings;
+        settings.TrayHintShown = true;
+        _engine.UpdateSettings(settings);
+        Persist();
+        _tray.ShowBalloonTip(5000, "O Guaraná continua aqui",
+            "Suas configurações foram salvas. Clique no ícone da bandeja para abrir de novo.", ToolTipIcon.None);
+    }
+
     private void Persist()
     {
         _settings = _engine.CurrentSettings;

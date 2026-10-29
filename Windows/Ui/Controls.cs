@@ -459,7 +459,7 @@ internal sealed class TextField : Panel, IThemed
 /// <summary>Linha de configuração: título e descrição à esquerda, controle à direita.</summary>
 internal sealed class SettingRow : TableLayoutPanel
 {
-    public SettingRow(string title, string description, Control control)
+    public SettingRow(string title, string description, Control control, Font? titleFont = null)
     {
         ColumnCount = 2;
         RowCount = 2;
@@ -472,7 +472,7 @@ internal sealed class SettingRow : TableLayoutPanel
         RowStyles.Add(new RowStyle(SizeType.AutoSize));
         RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var titleLabel = new ThemedLabel(title, Theme.BodyStrong) { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+        var titleLabel = new ThemedLabel(title, titleFont ?? Theme.BodyStrong) { Anchor = AnchorStyles.Left | AnchorStyles.Right };
         var descLabel = new ThemedLabel(description, Theme.Small, muted: true)
         {
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
@@ -505,4 +505,82 @@ internal sealed class Divider : Control, IThemed
     public override Size GetPreferredSize(Size proposedSize) => new(proposedSize.Width, 1);
 
     public void ApplyTheme(Palette p) => BackColor = p.Border;
+}
+
+/// <summary>Rodapé fixo: confirma que tudo foi salvo e convida a fechar a janela sem receio.</summary>
+internal sealed class FooterBar : Panel, IThemed
+{
+    private readonly Label _status = new()
+    {
+        Font = Theme.BodyStrong,
+        AutoSize = true,
+        BackColor = Color.Transparent,
+        UseMnemonic = false,
+        Margin = Padding.Empty
+    };
+    private readonly ThemedLabel _hint = new("Ao fechar, o Guaraná continua rodando na bandeja.", Theme.Small, muted: true);
+    private bool _error;
+
+    public PillButton Done { get; } = new("Concluir", PillKind.Primary);
+
+    public FooterBar()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        Dock = DockStyle.Bottom;
+        Height = 68;
+        Padding = new Padding(24, 0, 24, 0);
+        var text = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty,
+            Anchor = AnchorStyles.Left
+        };
+        _hint.Margin = new Padding(0, 2, 0, 0);
+        text.Controls.Add(_status, 0, 0);
+        text.Controls.Add(_hint, 0, 1);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        Done.Anchor = AnchorStyles.Right;
+        Done.Margin = Padding.Empty;
+        layout.Controls.Add(text, 0, 0);
+        layout.Controls.Add(Done, 1, 0);
+        Controls.Add(layout);
+    }
+
+    public string Status => _status.Text;
+    public bool IsError => _error;
+
+    public void SetStatus(string text, bool error)
+    {
+        _error = error;
+        _status.Text = text;
+        _status.ForeColor = error ? Theme.Current.Danger : Theme.Current.Text;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using var pen = new Pen(Theme.Current.Border);
+        e.Graphics.DrawLine(pen, 0, 0, Width, 0);
+    }
+
+    public void ApplyTheme(Palette p)
+    {
+        BackColor = p.Surface;
+        SetStatus(_status.Text, _error);
+        Invalidate(true);
+    }
 }
