@@ -141,6 +141,16 @@ internal static class Theme
         DwmSetWindowAttribute(form.Handle, DwmCaptionColor, ref caption, sizeof(int));
     }
 
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hwnd, string? appName, string? idList);
+
+    /// <summary>Barras de rolagem escuras no tema escuro (Windows 10 1809+).</summary>
+    public static void ApplyScrollbars(Control control)
+    {
+        if (control.IsHandleCreated)
+            SetWindowTheme(control.Handle, Current.Dark ? "DarkMode_Explorer" : "Explorer", null);
+    }
+
     // ---- Drawing helpers ------------------------------------------------------------
 
     public static Color Hex(string hex) => ColorTranslator.FromHtml(hex);

@@ -19,8 +19,15 @@ internal sealed class SettingsForm : Form
     private readonly ToggleSwitch _preventSleep = new();
     private readonly ToggleSwitch _startup = new();
     private readonly TextField _interval = new(84) { Suffix = "seg" };
-    private readonly ThemedLabel _footerText = new("", Theme.Small, muted: true);
-    private readonly Panel _footer = new() { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(24, 0, 24, 0) };
+    private readonly FooterBar _footer = new();
+    private readonly TableLayoutPanel _scheduleBody = new()
+    {
+        ColumnCount = 1,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        BackColor = Color.Transparent,
+        Margin = Padding.Empty
+    };
     private readonly System.Windows.Forms.Timer _saveDelay = new() { Interval = 450 };
     private string? _pulseError;
     private bool _loading;
@@ -37,8 +44,8 @@ internal sealed class SettingsForm : Form
         Icon = context.AppIcon;
         Font = Theme.Body;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(660, 760);
-        MinimumSize = new Size(560, 520);
+        ClientSize = new Size(640, 860);
+        MinimumSize = new Size(600, 540);
         MaximizeBox = false;
         KeyPreview = true;
 
@@ -49,11 +56,7 @@ internal sealed class SettingsForm : Form
         _stack.Controls.Add(BuildScheduleCard());
         _stack.Controls.Add(BuildPreferencesCard());
 
-        _footerText.Anchor = AnchorStyles.Left;
-        _footerText.Dock = DockStyle.Fill;
-        _footerText.AutoSize = false;
-        _footerText.TextAlign = ContentAlignment.MiddleLeft;
-        _footer.Controls.Add(_footerText);
+        _footer.Done.Click += (_, _) => Close();
 
         Controls.Add(_stack);
         Controls.Add(_footer);
@@ -78,6 +81,7 @@ internal sealed class SettingsForm : Form
             if (_saveDelay.Enabled) { _saveDelay.Stop(); SavePreferences(); }
             e.Cancel = true;
             Hide();
+            _context.WindowHidden();
         };
     }
 
@@ -155,16 +159,27 @@ internal sealed class SettingsForm : Form
     {
         var card = new Card();
         card.AddRow(new SettingRow("Horários programados",
-            "Fora dos períodos, o Guaraná fica em repouso e não envia nenhum sinal.", _schedule));
-        AddDivider(card);
-        card.AddRow(_scheduleEditor);
-        card.AddRow(new ThemedLabel(
+            "Ative para seguir uma agenda semanal. Fora dos períodos, nenhum sinal é enviado.",
+            _schedule, Theme.SectionTitle));
+
+        // O editor só aparece com a programação ligada; desligada, o cartão fica compacto.
+        _scheduleBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var divider = new Divider { Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top, Margin = new Padding(0, 16, 0, 16) };
+        _scheduleEditor.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+        var hint = new ThemedLabel(
             "Início incluído, fim excluído. Se o fim for igual ou anterior ao início, o período termina no dia seguinte.",
-            Theme.Small, muted: true), 6);
+            Theme.Small, muted: true)
+        { Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top, Margin = new Padding(0, 8, 0, 0) };
+        foreach (var control in new Control[] { divider, _scheduleEditor, hint })
+        {
+            _scheduleBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _scheduleBody.Controls.Add(control, 0, _scheduleBody.RowCount++);
+        }
+        card.AddRow(_scheduleBody);
 
         _schedule.CheckedChanged += (_, _) =>
         {
-            _scheduleEditor.Enabled = _schedule.Checked;
+            ShowScheduleBody(_schedule.Checked);
             QueueSave();
         };
         _scheduleEditor.Changed += (_, _) => QueueSave();
@@ -197,6 +212,13 @@ internal sealed class SettingsForm : Form
         return card;
     }
 
+    private void ShowScheduleBody(bool visible)
+    {
+        _scheduleBody.Visible = visible;
+        _stack.PerformLayout();
+        _stack.Invalidate(true);
+    }
+
     private static void AddDivider(Card card)
     {
         var divider = new Divider();
@@ -211,13 +233,13 @@ internal sealed class SettingsForm : Form
         _loading = true;
         _schedule.SetSilently(settings.ScheduleEnabled);
         _scheduleEditor.Load(settings.Rules);
-        _scheduleEditor.Enabled = settings.ScheduleEnabled;
+        _scheduleBody.Visible = settings.ScheduleEnabled;
         _onlyWhenIdle.SetSilently(settings.OnlyWhenIdle);
         _preventSleep.SetSilently(settings.PreventSleep);
         _startup.SetSilently(startup);
         _interval.Box.Text = settings.IntervalSeconds.ToString();
         _loading = false;
-        ShowFooter("As alterações são salvas automaticamente.", error: false);
+        ShowFooter(SavedText, error: false);
     }
 
     private int? ReadInterval() =>
@@ -260,7 +282,7 @@ internal sealed class SettingsForm : Form
         try
         {
             _context.ApplyPreferences(settings);
-            ShowFooter($"✓  Salvo às {DateTime.Now:HH:mm:ss}", error: false);
+            ShowFooter(SavedText, error: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -274,7 +296,7 @@ internal sealed class SettingsForm : Form
         try
         {
             _context.SetStartup(_startup.Checked);
-            ShowFooter(_startup.Checked ? "✓  Vai iniciar com o Windows." : "✓  Não vai mais iniciar com o Windows.", error: false);
+            ShowFooter(_startup.Checked ? "✓  Salvo · vai iniciar com o Windows" : "✓  Salvo · não vai mais iniciar com o Windows", error: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
                                        or System.Security.SecurityException)
@@ -284,12 +306,9 @@ internal sealed class SettingsForm : Form
         }
     }
 
-    private void ShowFooter(string text, bool error)
-    {
-        _footerText.Text = text;
-        _footerText.ForeColor = error ? Theme.Current.Danger : Theme.Current.TextMuted;
-        _footerText.Tag = error ? "error" : null;
-    }
+    private const string SavedText = "✓  Tudo salvo automaticamente";
+
+    private void ShowFooter(string text, bool error) => _footer.SetStatus(text, error);
 
     /// <summary>Chamado pelo contexto a cada mudança de estado.</summary>
     public void SetState(ActivationState state, DateTime now, string? pulseError)
@@ -299,8 +318,8 @@ internal sealed class SettingsForm : Form
         {
             _pulseError = pulseError;
             if (pulseError is not null) ShowFooter("Falha ao enviar F15: " + pulseError, error: true);
-            else if (_footerText.Text.StartsWith("Falha ao enviar", StringComparison.Ordinal))
-                ShowFooter("O envio voltou a funcionar.", error: false);
+            else if (_footer.Status.StartsWith("Falha ao enviar", StringComparison.Ordinal))
+                ShowFooter(SavedText, error: false);
         }
     }
 
@@ -318,10 +337,9 @@ internal sealed class SettingsForm : Form
         var p = Theme.Current;
         BackColor = p.Background;
         _stack.BackColor = p.Background;
-        _footer.BackColor = p.Background;
         Walk(this, p);
-        ShowFooter(_footerText.Text, _footerText.Tag as string == "error");
         Theme.ApplyChrome(this);
+        Theme.ApplyScrollbars(_stack);
         Invalidate(true);
     }
 
@@ -338,6 +356,16 @@ internal sealed class SettingsForm : Form
     {
         base.OnHandleCreated(e);
         Theme.ApplyChrome(this);
+        Theme.ApplyScrollbars(_stack);
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        // Usa a altura que couber na tela, para mostrar tudo sem rolagem sempre que possível.
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Height = Math.Min(Height, area.Height - LogicalToDeviceUnits(48));
+        Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)

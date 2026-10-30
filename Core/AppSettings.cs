@@ -18,6 +18,9 @@ public sealed class AppSettings
     /// <summary>Fim da ativação temporária em andamento; persiste entre reinícios.</summary>
     public DateTime? TemporaryUntil { get; set; }
 
+    /// <summary>Se o aviso "continua na bandeja" já foi mostrado ao fechar a janela.</summary>
+    public bool TrayHintShown { get; set; }
+
     public List<ScheduleRule> Rules { get; set; } = DefaultRules();
 
     public static List<ScheduleRule> DefaultRules() =>
@@ -38,6 +41,7 @@ public sealed class AppSettings
         OnlyWhenIdle = OnlyWhenIdle,
         PreventSleep = PreventSleep,
         TemporaryUntil = TemporaryUntil,
+        TrayHintShown = TrayHintShown,
         Rules = Rules.Select(r => r with { }).ToList()
     };
 }

@@ -203,33 +203,23 @@ internal sealed class PeriodRow : Panel
         return error is null;
     }
 
-    // Layout manual: os chips se ajustam à largura disponível; campos e botão ficam à direita.
-    // Em larguras pequenas, os horários descem para uma segunda linha.
-    private (int chipW, int height, bool wrap) Measure(int width)
+    // Layout manual numa única linha: os chips de dia encolhem para caber; horários e botão ficam à direita.
+    private int ChipWidth(int width)
     {
         int gap = LogicalToDeviceUnits(4);
-        int h = LogicalToDeviceUnits(32);
         int right = _start.Width + _end.Width + _remove.Width + TextRenderer.MeasureText("até", Theme.Small).Width
                     + LogicalToDeviceUnits(8) * 4;
-        int chipMin = LogicalToDeviceUnits(40), chipMax = LogicalToDeviceUnits(48);
         int available = width - right - LogicalToDeviceUnits(12);
-        int chipW = (available - gap * 6) / 7;
-        bool wrap = chipW < chipMin;
-        if (wrap) chipW = Math.Min(chipMax, (width - gap * 6) / 7);
-        chipW = Math.Min(chipMax, chipW);
-        return (chipW, wrap ? h * 2 + LogicalToDeviceUnits(8) : h, wrap);
+        return Math.Clamp((available - gap * 6) / 7, LogicalToDeviceUnits(30), LogicalToDeviceUnits(48));
     }
 
-    public override Size GetPreferredSize(Size proposedSize)
-    {
-        int width = proposedSize.Width > 0 ? proposedSize.Width : LogicalToDeviceUnits(520);
-        return new Size(width, Measure(width).height);
-    }
+    public override Size GetPreferredSize(Size proposedSize) =>
+        new(Math.Max(proposedSize.Width, 0), LogicalToDeviceUnits(32));
 
     protected override void OnLayout(LayoutEventArgs levent)
     {
         base.OnLayout(levent);
-        var (chipW, _, wrap) = Measure(Width);
+        int chipW = ChipWidth(Width);
         int gap = LogicalToDeviceUnits(4);
         int h = LogicalToDeviceUnits(32);
         int x = 0;
@@ -238,7 +228,7 @@ internal sealed class PeriodRow : Panel
             chip.SetBounds(x, 0, chipW, h);
             x += chipW + gap;
         }
-        int y = wrap ? h + LogicalToDeviceUnits(8) : 0;
+        int y = 0;
         int spacing = LogicalToDeviceUnits(8);
         int right = Width;
         _remove.SetBounds(right - _remove.Width, y, _remove.Width, h);
